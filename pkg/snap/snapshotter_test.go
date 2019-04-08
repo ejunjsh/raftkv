@@ -1,5 +1,14 @@
 package snap
 
+import (
+	"github.com/ejunjsh/kv/pkg/raft/raftpb"
+	"go.uber.org/zap"
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+)
+
 var testSnap = &raftpb.Snapshot{
 	Data: []byte("some snapshot"),
 	Metadata: raftpb.SnapshotMetadata{
@@ -18,7 +27,7 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	ss := New(dir)
+	ss := New(zap.NewExample(), dir)
 	err = ss.save(testSnap)
 	if err != nil {
 		t.Fatal(err)
