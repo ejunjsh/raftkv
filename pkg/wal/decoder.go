@@ -2,6 +2,7 @@ package wal
 
 import (
 	"bufio"
+	"encoding/binary"
 	"github.com/ejunjsh/kv/pkg/crc"
 	"github.com/ejunjsh/kv/pkg/wal/walpb"
 	"hash"
@@ -91,4 +92,58 @@ func (d *decoder) decodeRecord(rec *walpb.Record) error {
 	// record decoded as valid; point last valid offset to end of record
 	d.lastValidOff += frameSizeBytes + recBytes + padBytes
 	return nil
+}
+
+func decodeFrameSize(lenField int64) (recBytes int64, padBytes int64) {
+	// the record size is stored in the lower 56 bits of the 64-bit length
+	recBytes = int64(uint64(lenField) & ^(uint64(0xff) << 56))
+	// non-zero padding is indicated by set MSb / a negative length
+	if lenField < 0 {
+		// padding is stored in lower 3 bits of length MSB
+		padBytes = int64((uint64(lenField) >> 56) & 0x7)
+	}
+	return recBytes, padBytes
+}
+
+// isTornEntry determines whether the last entry of the WAL was partially written
+// and corrupted because of a torn write.
+func (d *decoder) isTornEntry(data []byte) bool {
+	if len(d.brs) != 1 {
+		return false
+	}
+
+	fileOff := d.lastValidOff + frameSizeBytes
+	curOff := 0
+	chunks := [][]byte{}
+	// split data on sector boundaries
+	for curOff < len(data) {
+		chunkLen := int(minSectorSize - (fileOff % minSectorSize))
+		if chunkLen > len(data)-curOff {
+			chunkLen = len(data) - curOff
+		}
+		chunks = append(chunks, data[curOff:curOff+chunkLen])
+		fileOff += int64(chunkLen)
+		curOff += chunkLen
+	}
+
+	// if any data for a sector chunk is all 0, it's a torn write
+	for _, sect := range chunks {
+		isZero := true
+		for _, v := range sect {
+			if v != 0 {
+				isZero = false
+				break
+			}
+		}
+		if isZero {
+			return true
+		}
+	}
+	return false
+}
+
+func readInt64(r io.Reader) (int64, error) {
+	var n int64
+	err := binary.Read(r, binary.LittleEndian, &n)
+	return n, err
 }
