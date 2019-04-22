@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"encoding/binary"
 	"github.com/ejunjsh/kv/pkg/crc"
+	"github.com/ejunjsh/kv/pkg/pbutil"
+	"github.com/ejunjsh/kv/pkg/raft/raftpb"
 	"github.com/ejunjsh/kv/pkg/wal/walpb"
 	"hash"
 	"io"
@@ -146,4 +148,26 @@ func readInt64(r io.Reader) (int64, error) {
 	var n int64
 	err := binary.Read(r, binary.LittleEndian, &n)
 	return n, err
+}
+
+func (d *decoder) updateCRC(prevCrc uint32) {
+	d.crc = crc.New(prevCrc, crcTable)
+}
+
+func (d *decoder) lastCRC() uint32 {
+	return d.crc.Sum32()
+}
+
+func (d *decoder) lastOffset() int64 { return d.lastValidOff }
+
+func mustUnmarshalEntry(d []byte) raftpb.Entry {
+	var e raftpb.Entry
+	pbutil.MustUnmarshal(&e, d)
+	return e
+}
+
+func mustUnmarshalState(d []byte) raftpb.HardState {
+	var s raftpb.HardState
+	pbutil.MustUnmarshal(&s, d)
+	return s
 }

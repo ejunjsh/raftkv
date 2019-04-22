@@ -2,7 +2,10 @@ package wal
 
 import (
 	"errors"
+	"fmt"
 	"github.com/ejunjsh/kv/pkg/fileutil"
+	"go.uber.org/zap"
+	"strings"
 )
 
 var errBadWALName = errors.New("bad wal name")
@@ -14,4 +17,80 @@ func Exist(dir string) bool {
 		return false
 	}
 	return len(names) != 0
+}
+
+// searchIndex returns the last array index of names whose raft index section is
+// equal to or smaller than the given index.
+// The given names MUST be sorted.
+func searchIndex(lg *zap.Logger, names []string, index uint64) (int, bool) {
+	for i := len(names) - 1; i >= 0; i-- {
+		name := names[i]
+		_, curIndex, err := parseWALName(name)
+		if err != nil {
+			lg.Panic("failed to parse WAL file name", zap.String("path", name), zap.Error(err))
+		}
+		if index >= curIndex {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+// names should have been sorted based on sequence number.
+// isValidSeq checks whether seq increases continuously.
+func isValidSeq(lg *zap.Logger, names []string) bool {
+	var lastSeq uint64
+	for _, name := range names {
+		curSeq, _, err := parseWALName(name)
+		if err != nil {
+			lg.Panic("failed to parse WAL file name", zap.String("path", name), zap.Error(err))
+		}
+		if lastSeq != 0 && lastSeq != curSeq-1 {
+			return false
+		}
+		lastSeq = curSeq
+	}
+	return true
+}
+
+func readWALNames(lg *zap.Logger, dirpath string) ([]string, error) {
+	names, err := fileutil.ReadDir(dirpath)
+	if err != nil {
+		return nil, err
+	}
+	wnames := checkWalNames(lg, names)
+	if len(wnames) == 0 {
+		return nil, ErrFileNotFound
+	}
+	return wnames, nil
+}
+
+func checkWalNames(lg *zap.Logger, names []string) []string {
+	wnames := make([]string, 0)
+	for _, name := range names {
+		if _, _, err := parseWALName(name); err != nil {
+			// don't complain about left over tmp files
+			if !strings.HasSuffix(name, ".tmp") {
+				lg.Warn(
+					"ignored file in WAL directory",
+					zap.String("path", name),
+				)
+			}
+			continue
+		}
+		wnames = append(wnames, name)
+	}
+	return wnames
+}
+
+func parseWALName(str string) (seq, index uint64, err error) {
+	if !strings.HasSuffix(str, ".wal") {
+		return 0, 0, errBadWALName
+	}
+	_, err = fmt.Sscanf(str, "%016x-%016x.wal", &seq, &index)
+	return seq, index, err
+}
+
+func walName(seq, index uint64) string {
+	return fmt.Sprintf("%016x-%016x.wal", seq, index)
 }
