@@ -2,8 +2,11 @@ package raft
 
 import (
 	"errors"
+	"fmt"
+	pb "github.com/ejunjsh/kv/pkg/raft/raftpb"
 	"math"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 )
@@ -184,4 +187,189 @@ type Config struct {
 	// logical clock from assigning the timestamp and then forwarding the data
 	// to the leader.
 	DisableProposalForwarding bool
+}
+
+func (c *Config) validate() error {
+	if c.ID == None {
+		return errors.New("cannot use none as id")
+	}
+
+	if c.HeartbeatTick <= 0 {
+		return errors.New("heartbeat tick must be greater than 0")
+	}
+
+	if c.ElectionTick <= c.HeartbeatTick {
+		return errors.New("election tick must be greater than heartbeat tick")
+	}
+
+	if c.Storage == nil {
+		return errors.New("storage cannot be nil")
+	}
+
+	if c.MaxUncommittedEntriesSize == 0 {
+		c.MaxUncommittedEntriesSize = noLimit
+	}
+
+	// default MaxCommittedSizePerReady to MaxSizePerMsg because they were
+	// previously the same parameter.
+	if c.MaxCommittedSizePerReady == 0 {
+		c.MaxCommittedSizePerReady = c.MaxSizePerMsg
+	}
+
+	if c.MaxInflightMsgs <= 0 {
+		return errors.New("max inflight messages must be greater than 0")
+	}
+
+	if c.Logger == nil {
+		c.Logger = raftLogger
+	}
+
+	if c.ReadOnlyOption == ReadOnlyLeaseBased && !c.CheckQuorum {
+		return errors.New("CheckQuorum must be enabled when ReadOnlyOption is ReadOnlyLeaseBased")
+	}
+
+	return nil
+}
+
+type raft struct {
+	id uint64
+
+	Term uint64
+	Vote uint64
+
+	readStates []ReadState
+
+	// the log
+	raftLog *raftLog
+
+	maxMsgSize         uint64
+	maxUncommittedSize uint64
+	maxInflight        int
+	prs                map[uint64]*Progress
+	learnerPrs         map[uint64]*Progress
+	matchBuf           uint64Slice
+
+	state StateType
+
+	// isLearner is true if the local raft node is a learner.
+	isLearner bool
+
+	votes map[uint64]bool
+
+	msgs []pb.Message
+
+	// the leader id
+	lead uint64
+	// leadTransferee is id of the leader transfer target when its value is not zero.
+	// Follow the procedure defined in raft thesis 3.10.
+	leadTransferee uint64
+	// Only one conf change may be pending (in the log, but not yet
+	// applied) at a time. This is enforced via pendingConfIndex, which
+	// is set to a value >= the log index of the latest pending
+	// configuration change (if any). Config changes are only allowed to
+	// be proposed if the leader's applied index is greater than this
+	// value.
+	pendingConfIndex uint64
+	// an estimate of the size of the uncommitted tail of the Raft log. Used to
+	// prevent unbounded log growth. Only maintained by the leader. Reset on
+	// term changes.
+	uncommittedSize uint64
+
+	readOnly *readOnly
+
+	// number of ticks since it reached last electionTimeout when it is leader
+	// or candidate.
+	// number of ticks since it reached last electionTimeout or received a
+	// valid message from current leader when it is a follower.
+	electionElapsed int
+
+	// number of ticks since it reached last heartbeatTimeout.
+	// only leader keeps heartbeatElapsed.
+	heartbeatElapsed int
+
+	checkQuorum bool
+	preVote     bool
+
+	heartbeatTimeout int
+	electionTimeout  int
+	// randomizedElectionTimeout is a random number between
+	// [electiontimeout, 2 * electiontimeout - 1]. It gets reset
+	// when raft changes its state to follower or candidate.
+	randomizedElectionTimeout int
+	disableProposalForwarding bool
+
+	tick func()
+	step stepFunc
+
+	logger Logger
+}
+
+func newRaft(c *Config) *raft {
+	if err := c.validate(); err != nil {
+		panic(err.Error())
+	}
+	raftlog := newLogWithSize(c.Storage, c.Logger, c.MaxCommittedSizePerReady)
+	hs, cs, err := c.Storage.InitialState()
+	if err != nil {
+		panic(err) // TODO(bdarnell)
+	}
+	peers := c.peers
+	learners := c.learners
+	if len(cs.Nodes) > 0 || len(cs.Learners) > 0 {
+		if len(peers) > 0 || len(learners) > 0 {
+			// TODO(bdarnell): the peers argument is always nil except in
+			// tests; the argument should be removed and these tests should be
+			// updated to specify their nodes through a snapshot.
+			panic("cannot specify both newRaft(peers, learners) and ConfState.(Nodes, Learners)")
+		}
+		peers = cs.Nodes
+		learners = cs.Learners
+	}
+	r := &raft{
+		id:                        c.ID,
+		lead:                      None,
+		isLearner:                 false,
+		raftLog:                   raftlog,
+		maxMsgSize:                c.MaxSizePerMsg,
+		maxInflight:               c.MaxInflightMsgs,
+		maxUncommittedSize:        c.MaxUncommittedEntriesSize,
+		prs:                       make(map[uint64]*Progress),
+		learnerPrs:                make(map[uint64]*Progress),
+		electionTimeout:           c.ElectionTick,
+		heartbeatTimeout:          c.HeartbeatTick,
+		logger:                    c.Logger,
+		checkQuorum:               c.CheckQuorum,
+		preVote:                   c.PreVote,
+		readOnly:                  newReadOnly(c.ReadOnlyOption),
+		disableProposalForwarding: c.DisableProposalForwarding,
+	}
+	for _, p := range peers {
+		r.prs[p] = &Progress{Next: 1, ins: newInflights(r.maxInflight)}
+	}
+	for _, p := range learners {
+		if _, ok := r.prs[p]; ok {
+			panic(fmt.Sprintf("node %x is in both learner and peer list", p))
+		}
+		r.learnerPrs[p] = &Progress{Next: 1, ins: newInflights(r.maxInflight), IsLearner: true}
+		if r.id == p {
+			r.isLearner = true
+		}
+	}
+
+	if !isHardStateEqual(hs, emptyState) {
+		r.loadState(hs)
+	}
+	if c.Applied > 0 {
+		raftlog.appliedTo(c.Applied)
+	}
+	r.becomeFollower(r.Term, None)
+
+	var nodesStrs []string
+	for _, n := range r.nodes() {
+		nodesStrs = append(nodesStrs, fmt.Sprintf("%x", n))
+	}
+
+	r.logger.Infof("newRaft %x [peers: [%s], term: %d, commit: %d, applied: %d, lastindex: %d, lastterm: %d]",
+		r.id, strings.Join(nodesStrs, ","), r.Term, r.raftLog.committed, r.raftLog.applied, r.raftLog.lastIndex(), r.raftLog.lastTerm())
+	return r
 }
