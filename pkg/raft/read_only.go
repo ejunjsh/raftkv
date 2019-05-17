@@ -57,3 +57,48 @@ func (ro *readOnly) recvAck(m pb.Message) int {
 	// add one to include an ack from local node
 	return len(rs.acks) + 1
 }
+
+// advance advances the read only request queue kept by the readonly struct.
+// It dequeues the requests until it finds the read only request that has
+// the same context as the given `m`.
+func (ro *readOnly) advance(m pb.Message) []*readIndexStatus {
+	var (
+		i     int
+		found bool
+	)
+
+	ctx := string(m.Context)
+	rss := []*readIndexStatus{}
+
+	for _, okctx := range ro.readIndexQueue {
+		i++
+		rs, ok := ro.pendingReadIndex[okctx]
+		if !ok {
+			panic("cannot find corresponding read state from pending map")
+		}
+		rss = append(rss, rs)
+		if okctx == ctx {
+			found = true
+			break
+		}
+	}
+
+	if found {
+		ro.readIndexQueue = ro.readIndexQueue[i:]
+		for _, rs := range rss {
+			delete(ro.pendingReadIndex, string(rs.req.Entries[0].Data))
+		}
+		return rss
+	}
+
+	return nil
+}
+
+// lastPendingRequestCtx returns the context of the last pending read only
+// request in readonly struct.
+func (ro *readOnly) lastPendingRequestCtx() string {
+	if len(ro.readIndexQueue) == 0 {
+		return ""
+	}
+	return ro.readIndexQueue[len(ro.readIndexQueue)-1]
+}
