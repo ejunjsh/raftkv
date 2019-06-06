@@ -1,4 +1,4 @@
-# kv
+# raftkv
 
 [![Build Status](https://travis-ci.org/ejunjsh/raftkv.svg?branch=master)](https://travis-ci.org/ejunjsh/raftkv)
 

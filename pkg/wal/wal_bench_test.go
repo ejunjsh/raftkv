@@ -1,7 +1,7 @@
 package wal
 
 import (
-	"github.com/ejunjsh/kv/pkg/raft/raftpb"
+	"github.com/ejunjsh/raftkv/pkg/raft/raftpb"
 	"io/ioutil"
 	"os"
 	"testing"

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	pb "github.com/ejunjsh/kv/pkg/raft/raftpb"
+	pb "github.com/ejunjsh/raftkv/pkg/raft/raftpb"
 	"math"
 	"math/rand"
 	"sort"

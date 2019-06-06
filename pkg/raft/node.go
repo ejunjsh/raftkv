@@ -3,7 +3,7 @@ package raft
 import (
 	"context"
 	"errors"
-	pb "github.com/ejunjsh/kv/pkg/raft/raftpb"
+	pb "github.com/ejunjsh/raftkv/pkg/raft/raftpb"
 )
 
 type SnapshotStatus int

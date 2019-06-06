@@ -1,7 +1,7 @@
 package ioutil
 
 import (
-	"github.com/ejunjsh/kv/pkg/fileutil"
+	"github.com/ejunjsh/raftkv/pkg/fileutil"
 	"io"
 	"os"
 )

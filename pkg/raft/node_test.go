@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ejunjsh/kv/pkg/raft/raftpb"
-	"github.com/ejunjsh/kv/pkg/testutil"
+	"github.com/ejunjsh/raftkv/pkg/raft/raftpb"
+	"github.com/ejunjsh/raftkv/pkg/testutil"
 )
 
 // readyWithTimeout selects from n.Ready() with a 1-second timeout. It

@@ -2,7 +2,7 @@ package wal
 
 import (
 	"bytes"
-	"github.com/ejunjsh/kv/pkg/wal/walpb"
+	"github.com/ejunjsh/raftkv/pkg/wal/walpb"
 	"hash/crc32"
 	"io"
 	"io/ioutil"

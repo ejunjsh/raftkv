@@ -2,10 +2,10 @@ package wal
 
 import (
 	"bytes"
-	"github.com/ejunjsh/kv/pkg/fileutil"
-	"github.com/ejunjsh/kv/pkg/pbutil"
-	"github.com/ejunjsh/kv/pkg/raft/raftpb"
-	"github.com/ejunjsh/kv/pkg/wal/walpb"
+	"github.com/ejunjsh/raftkv/pkg/fileutil"
+	"github.com/ejunjsh/raftkv/pkg/pbutil"
+	"github.com/ejunjsh/raftkv/pkg/raft/raftpb"
+	"github.com/ejunjsh/raftkv/pkg/wal/walpb"
 	"go.uber.org/zap"
 	"io"
 	"io/ioutil"

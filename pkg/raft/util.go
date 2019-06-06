@@ -3,7 +3,7 @@ package raft
 import (
 	"bytes"
 	"fmt"
-	pb "github.com/ejunjsh/kv/pkg/raft/raftpb"
+	pb "github.com/ejunjsh/raftkv/pkg/raft/raftpb"
 	"io"
 	"io/ioutil"
 	"os"

@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	pb "github.com/ejunjsh/kv/pkg/raft/raftpb"
+	pb "github.com/ejunjsh/raftkv/pkg/raft/raftpb"
 )
 
 // nextEnts returns the appliable entries and updates the applied index

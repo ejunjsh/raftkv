@@ -2,7 +2,7 @@ package wal
 
 import (
 	"fmt"
-	"github.com/ejunjsh/kv/pkg/fileutil"
+	"github.com/ejunjsh/raftkv/pkg/fileutil"
 	"go.uber.org/zap"
 	"os"
 	"path/filepath"

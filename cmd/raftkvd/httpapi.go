@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/ejunjsh/kv/pkg/raft/raftpb"
+	"github.com/ejunjsh/raftkv/pkg/raft/raftpb"
 )
 
 // Handler for a http based key-value store backed by raft

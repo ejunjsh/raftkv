@@ -1,6 +1,6 @@
 package raft
 
-import pb "github.com/ejunjsh/kv/pkg/raft/raftpb"
+import pb "github.com/ejunjsh/raftkv/pkg/raft/raftpb"
 
 // unstable.entries[i] has raft log position i+unstable.offset.
 // Note that unstable.offset may be less than the highest log

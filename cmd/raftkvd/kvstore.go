@@ -7,7 +7,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/ejunjsh/kv/pkg/snap"
+	"github.com/ejunjsh/raftkv/pkg/snap"
 )
 
 // a key-value store backed by raft

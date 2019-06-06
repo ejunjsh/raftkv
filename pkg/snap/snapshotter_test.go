@@ -2,7 +2,7 @@ package snap
 
 import (
 	"fmt"
-	"github.com/ejunjsh/kv/pkg/raft/raftpb"
+	"github.com/ejunjsh/raftkv/pkg/raft/raftpb"
 	"go.uber.org/zap"
 	"hash/crc32"
 	"io/ioutil"

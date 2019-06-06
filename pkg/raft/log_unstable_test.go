@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	pb "github.com/ejunjsh/kv/pkg/raft/raftpb"
+	pb "github.com/ejunjsh/raftkv/pkg/raft/raftpb"
 )
 
 func TestUnstableMaybeFirstIndex(t *testing.T) {

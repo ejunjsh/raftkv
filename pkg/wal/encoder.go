@@ -2,9 +2,9 @@ package wal
 
 import (
 	"encoding/binary"
-	"github.com/ejunjsh/kv/pkg/crc"
-	"github.com/ejunjsh/kv/pkg/ioutil"
-	"github.com/ejunjsh/kv/pkg/wal/walpb"
+	"github.com/ejunjsh/raftkv/pkg/crc"
+	"github.com/ejunjsh/raftkv/pkg/ioutil"
+	"github.com/ejunjsh/raftkv/pkg/wal/walpb"
 	"hash"
 	"io"
 	"os"
