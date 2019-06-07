@@ -135,3 +135,307 @@ func (t *Transport) Start() error {
 	}
 	return nil
 }
+
+func (t *Transport) Handler() http.Handler {
+	pipelineHandler := newPipelineHandler(t, t.Raft, t.ClusterID)
+	streamHandler := newStreamHandler(t, t, t.Raft, t.ID, t.ClusterID)
+	snapHandler := newSnapshotHandler(t, t.Raft, t.Snapshotter, t.ClusterID)
+	mux := http.NewServeMux()
+	mux.Handle(RaftPrefix, pipelineHandler)
+	mux.Handle(RaftStreamPrefix+"/", streamHandler)
+	mux.Handle(RaftSnapshotPrefix, snapHandler)
+	mux.Handle(ProbingPrefix, probing.NewHandler())
+	return mux
+}
+
+func (t *Transport) Get(id types.ID) Peer {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.peers[id]
+}
+
+func (t *Transport) Send(msgs []raftpb.Message) {
+	for _, m := range msgs {
+		if m.To == 0 {
+			// ignore intentionally dropped message
+			continue
+		}
+		to := types.ID(m.To)
+
+		t.mu.RLock()
+		p, pok := t.peers[to]
+		g, rok := t.remotes[to]
+		t.mu.RUnlock()
+
+		if pok {
+			if m.Type == raftpb.MsgApp {
+				t.ServerStats.SendAppendReq(m.Size())
+			}
+			p.send(m)
+			continue
+		}
+
+		if rok {
+			g.send(m)
+			continue
+		}
+
+		if t.Logger != nil {
+			t.Logger.Debug(
+				"ignored message send request; unknown remote peer target",
+				zap.String("type", m.Type.String()),
+				zap.String("unknown-target-peer-id", to.String()),
+			)
+		} else {
+			plog.Debugf("ignored message %s (sent to unknown peer %s)", m.Type, to)
+		}
+	}
+}
+
+func (t *Transport) Stop() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, r := range t.remotes {
+		r.stop()
+	}
+	for _, p := range t.peers {
+		p.stop()
+	}
+	t.pipelineProber.RemoveAll()
+	t.streamProber.RemoveAll()
+	if tr, ok := t.streamRt.(*http.Transport); ok {
+		tr.CloseIdleConnections()
+	}
+	if tr, ok := t.pipelineRt.(*http.Transport); ok {
+		tr.CloseIdleConnections()
+	}
+	t.peers = nil
+	t.remotes = nil
+}
+
+// CutPeer drops messages to the specified peer.
+func (t *Transport) CutPeer(id types.ID) {
+	t.mu.RLock()
+	p, pok := t.peers[id]
+	g, gok := t.remotes[id]
+	t.mu.RUnlock()
+
+	if pok {
+		p.(Pausable).Pause()
+	}
+	if gok {
+		g.Pause()
+	}
+}
+
+// MendPeer recovers the message dropping behavior of the given peer.
+func (t *Transport) MendPeer(id types.ID) {
+	t.mu.RLock()
+	p, pok := t.peers[id]
+	g, gok := t.remotes[id]
+	t.mu.RUnlock()
+
+	if pok {
+		p.(Pausable).Resume()
+	}
+	if gok {
+		g.Resume()
+	}
+}
+
+func (t *Transport) AddRemote(id types.ID, us []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.remotes == nil {
+		// there's no clean way to shutdown the golang http server
+		// (see: https://github.com/golang/go/issues/4674) before
+		// stopping the transport; ignore any new connections.
+		return
+	}
+	if _, ok := t.peers[id]; ok {
+		return
+	}
+	if _, ok := t.remotes[id]; ok {
+		return
+	}
+	urls, err := types.NewURLs(us)
+	if err != nil {
+		if t.Logger != nil {
+			t.Logger.Panic("failed NewURLs", zap.Strings("urls", us), zap.Error(err))
+		} else {
+			plog.Panicf("newURLs %+v should never fail: %+v", us, err)
+		}
+	}
+	t.remotes[id] = startRemote(t, urls, id)
+
+	if t.Logger != nil {
+		t.Logger.Info(
+			"added new remote peer",
+			zap.String("local-member-id", t.ID.String()),
+			zap.String("remote-peer-id", id.String()),
+			zap.Strings("remote-peer-urls", us),
+		)
+	}
+}
+
+func (t *Transport) AddPeer(id types.ID, us []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.peers == nil {
+		panic("transport stopped")
+	}
+	if _, ok := t.peers[id]; ok {
+		return
+	}
+	urls, err := types.NewURLs(us)
+	if err != nil {
+		if t.Logger != nil {
+			t.Logger.Panic("failed NewURLs", zap.Strings("urls", us), zap.Error(err))
+		} else {
+			plog.Panicf("newURLs %+v should never fail: %+v", us, err)
+		}
+	}
+	fs := t.LeaderStats.Follower(id.String())
+	t.peers[id] = startPeer(t, urls, id, fs)
+	addPeerToProber(t.Logger, t.pipelineProber, id.String(), us, RoundTripperNameSnapshot, rttSec)
+	addPeerToProber(t.Logger, t.streamProber, id.String(), us, RoundTripperNameRaftMessage, rttSec)
+
+	if t.Logger != nil {
+		t.Logger.Info(
+			"added remote peer",
+			zap.String("local-member-id", t.ID.String()),
+			zap.String("remote-peer-id", id.String()),
+			zap.Strings("remote-peer-urls", us),
+		)
+	} else {
+		plog.Infof("added peer %s", id)
+	}
+}
+
+func (t *Transport) RemovePeer(id types.ID) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.removePeer(id)
+}
+
+func (t *Transport) RemoveAllPeers() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for id := range t.peers {
+		t.removePeer(id)
+	}
+}
+
+// the caller of this function must have the peers mutex.
+func (t *Transport) removePeer(id types.ID) {
+	if peer, ok := t.peers[id]; ok {
+		peer.stop()
+	} else {
+		if t.Logger != nil {
+			t.Logger.Panic("unexpected removal of unknown remote peer", zap.String("remote-peer-id", id.String()))
+		} else {
+			plog.Panicf("unexpected removal of unknown peer '%d'", id)
+		}
+	}
+	delete(t.peers, id)
+	delete(t.LeaderStats.Followers, id.String())
+	t.pipelineProber.Remove(id.String())
+	t.streamProber.Remove(id.String())
+
+	if t.Logger != nil {
+		t.Logger.Info(
+			"removed remote peer",
+			zap.String("local-member-id", t.ID.String()),
+			zap.String("removed-remote-peer-id", id.String()),
+		)
+	} else {
+		plog.Infof("removed peer %s", id)
+	}
+}
+
+func (t *Transport) UpdatePeer(id types.ID, us []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// TODO: return error or just panic?
+	if _, ok := t.peers[id]; !ok {
+		return
+	}
+	urls, err := types.NewURLs(us)
+	if err != nil {
+		if t.Logger != nil {
+			t.Logger.Panic("failed NewURLs", zap.Strings("urls", us), zap.Error(err))
+		} else {
+			plog.Panicf("newURLs %+v should never fail: %+v", us, err)
+		}
+	}
+	t.peers[id].update(urls)
+
+	t.pipelineProber.Remove(id.String())
+	addPeerToProber(t.Logger, t.pipelineProber, id.String(), us, RoundTripperNameSnapshot, rttSec)
+	t.streamProber.Remove(id.String())
+	addPeerToProber(t.Logger, t.streamProber, id.String(), us, RoundTripperNameRaftMessage, rttSec)
+
+	if t.Logger != nil {
+		t.Logger.Info(
+			"updated remote peer",
+			zap.String("local-member-id", t.ID.String()),
+			zap.String("updated-remote-peer-id", id.String()),
+			zap.Strings("updated-remote-peer-urls", us),
+		)
+	} else {
+		plog.Infof("updated peer %s", id)
+	}
+}
+
+func (t *Transport) ActiveSince(id types.ID) time.Time {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if p, ok := t.peers[id]; ok {
+		return p.activeSince()
+	}
+	return time.Time{}
+}
+
+func (t *Transport) SendSnapshot(m snap.Message) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	p := t.peers[types.ID(m.To)]
+	if p == nil {
+		m.CloseWithError(errMemberNotFound)
+		return
+	}
+	p.sendSnap(m)
+}
+
+// Pausable is a testing interface for pausing transport traffic.
+type Pausable interface {
+	Pause()
+	Resume()
+}
+
+func (t *Transport) Pause() {
+	for _, p := range t.peers {
+		p.(Pausable).Pause()
+	}
+}
+
+func (t *Transport) Resume() {
+	for _, p := range t.peers {
+		p.(Pausable).Resume()
+	}
+}
+
+// ActivePeers returns a channel that closes when an initial
+// peer connection has been established. Use this to wait until the
+// first peer connection becomes active.
+func (t *Transport) ActivePeers() (cnt int) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	for _, p := range t.peers {
+		if !p.activeSince().IsZero() {
+			cnt++
+		}
+	}
+	return cnt
+}
