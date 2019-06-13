@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/ejunjsh/raftkv/cmd/raftkvd/rafthttp"
 	"github.com/ejunjsh/raftkv/pkg/raft"
@@ -77,4 +78,16 @@ func newRaftNode(id int, peers []string, join bool, getSnapshot func() ([]byte, 
 	}
 	go rc.startRaft()
 	return commitC, errorC, rc.snapshotterReady
+}
+
+func (rc *raftNode) Process(ctx context.Context, m raftpb.Message) error {
+	return rc.node.Step(ctx, m)
+}
+
+func (rc *raftNode) IsIDRemoved(id uint64) bool { return false }
+func (rc *raftNode) ReportUnreachable(id uint64) {
+	rc.node.ReportUnreachable(id)
+}
+func (rc *raftNode) ReportSnapshot(id uint64, status raft.SnapshotStatus) {
+	rc.node.ReportSnapshot(id, status)
 }

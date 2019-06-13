@@ -5,6 +5,7 @@ import (
 	"github.com/ejunjsh/raftkv/pkg/raft"
 	"github.com/ejunjsh/raftkv/pkg/raft/raftpb"
 	"github.com/ejunjsh/raftkv/pkg/snap"
+	"github.com/ejunjsh/raftkv/pkg/transport"
 	"github.com/ejunjsh/raftkv/pkg/types"
 	"github.com/xiang90/probing"
 	"go.uber.org/zap"
@@ -180,15 +181,12 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 			continue
 		}
 
-		if t.Logger != nil {
-			t.Logger.Debug(
-				"ignored message send request; unknown remote peer target",
-				zap.String("type", m.Type.String()),
-				zap.String("unknown-target-peer-id", to.String()),
-			)
-		} else {
-			plog.Debugf("ignored message %s (sent to unknown peer %s)", m.Type, to)
-		}
+		t.Logger.Debug(
+			"ignored message send request; unknown remote peer target",
+			zap.String("type", m.Type.String()),
+			zap.String("unknown-target-peer-id", to.String()),
+		)
+
 	}
 }
 
