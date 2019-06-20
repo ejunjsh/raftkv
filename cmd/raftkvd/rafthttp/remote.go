@@ -59,7 +59,6 @@ func (g *remote) send(m raftpb.Message) {
 				zap.Bool("remote-peer-active", g.status.isActive()),
 			)
 		}
-		sentFailures.WithLabelValues(types.ID(m.To).String()).Inc()
 	}
 }
 
