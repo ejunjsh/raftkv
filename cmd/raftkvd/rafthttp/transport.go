@@ -7,7 +7,6 @@ import (
 	"github.com/ejunjsh/raftkv/pkg/snap"
 	"github.com/ejunjsh/raftkv/pkg/transport"
 	"github.com/ejunjsh/raftkv/pkg/types"
-	"github.com/xiang90/probing"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 	"net/http"
@@ -40,7 +39,7 @@ type Transporter interface {
 	Send(m []raftpb.Message)
 	// SendSnapshot sends out the given snapshot message to a remote peer.
 	// The behavior of SendSnapshot is similar to Send.
-	SendSnapshot(m snap.Message)
+	//SendSnapshot(m snap.Message)
 	// AddRemote adds a remote with given peer urls into the transport.
 	// A remote helps newly joined member to catch up the progress of cluster,
 	// and will not be used after that.
@@ -92,10 +91,10 @@ type Transport struct {
 	ClusterID   types.ID   // raft cluster ID for request validation
 	Raft        Raft       // raft state machine, to which the Transport forwards received messages and reports status
 	Snapshotter *snap.Snapshotter
-	ServerStats *stats.ServerStats // used to record general transportation statistics
+	//ServerStats *stats.ServerStats // used to record general transportation statistics
 	// used to record transportation statistics with followers when
 	// performing as leader in raft protocol
-	LeaderStats *stats.LeaderStats
+	//LeaderStats *stats.LeaderStats
 	// ErrorC is used to report detected critical errors, e.g.,
 	// the member has been permanently removed from the cluster
 	// When an error is received from ErrorC, user should stop raft state
@@ -109,8 +108,8 @@ type Transport struct {
 	remotes map[types.ID]*remote // remotes map that helps newly joined member to catch up
 	peers   map[types.ID]Peer    // peers map
 
-	pipelineProber probing.Prober
-	streamProber   probing.Prober
+	//pipelineProber probing.Prober
+	//streamProber   probing.Prober
 }
 
 func (t *Transport) Start() error {
@@ -125,8 +124,8 @@ func (t *Transport) Start() error {
 	}
 	t.remotes = make(map[types.ID]*remote)
 	t.peers = make(map[types.ID]Peer)
-	t.pipelineProber = probing.NewProber(t.pipelineRt)
-	t.streamProber = probing.NewProber(t.streamRt)
+	//t.pipelineProber = probing.NewProber(t.pipelineRt)
+	//t.streamProber = probing.NewProber(t.streamRt)
 
 	// If client didn't provide dial retry frequency, use the default
 	// (100ms backoff between attempts to create a new stream),
@@ -145,7 +144,7 @@ func (t *Transport) Handler() http.Handler {
 	mux.Handle(RaftPrefix, pipelineHandler)
 	mux.Handle(RaftStreamPrefix+"/", streamHandler)
 	mux.Handle(RaftSnapshotPrefix, snapHandler)
-	mux.Handle(ProbingPrefix, probing.NewHandler())
+	//mux.Handle(ProbingPrefix, probing.NewHandler())
 	return mux
 }
 
@@ -169,9 +168,9 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 		t.mu.RUnlock()
 
 		if pok {
-			if m.Type == raftpb.MsgApp {
-				t.ServerStats.SendAppendReq(m.Size())
-			}
+			//if m.Type == raftpb.MsgApp {
+			//	t.ServerStats.SendAppendReq(m.Size())
+			//}
 			p.send(m)
 			continue
 		}
@@ -199,8 +198,8 @@ func (t *Transport) Stop() {
 	for _, p := range t.peers {
 		p.stop()
 	}
-	t.pipelineProber.RemoveAll()
-	t.streamProber.RemoveAll()
+	//t.pipelineProber.RemoveAll()
+	//t.streamProber.RemoveAll()
 	if tr, ok := t.streamRt.(*http.Transport); ok {
 		tr.CloseIdleConnections()
 	}
@@ -286,10 +285,10 @@ func (t *Transport) AddPeer(id types.ID, us []string) {
 	if err != nil {
 		t.Logger.Panic("failed NewURLs", zap.Strings("urls", us), zap.Error(err))
 	}
-	fs := t.LeaderStats.Follower(id.String())
-	t.peers[id] = startPeer(t, urls, id, fs)
-	addPeerToProber(t.Logger, t.pipelineProber, id.String(), us, RoundTripperNameSnapshot, rttSec)
-	addPeerToProber(t.Logger, t.streamProber, id.String(), us, RoundTripperNameRaftMessage, rttSec)
+	//fs := t.LeaderStats.Follower(id.String())
+	t.peers[id] = startPeer(t, urls, id)
+	//addPeerToProber(t.Logger, t.pipelineProber, id.String(), us, RoundTripperNameSnapshot, rttSec)
+	//addPeerToProber(t.Logger, t.streamProber, id.String(), us, RoundTripperNameRaftMessage, rttSec)
 
 	t.Logger.Info(
 		"added remote peer",
@@ -318,16 +317,12 @@ func (t *Transport) removePeer(id types.ID) {
 	if peer, ok := t.peers[id]; ok {
 		peer.stop()
 	} else {
-		if t.Logger != nil {
-			t.Logger.Panic("unexpected removal of unknown remote peer", zap.String("remote-peer-id", id.String()))
-		} else {
-			plog.Panicf("unexpected removal of unknown peer '%d'", id)
-		}
+		t.Logger.Panic("unexpected removal of unknown remote peer", zap.String("remote-peer-id", id.String()))
 	}
 	delete(t.peers, id)
-	delete(t.LeaderStats.Followers, id.String())
-	t.pipelineProber.Remove(id.String())
-	t.streamProber.Remove(id.String())
+	//delete(t.LeaderStats.Followers, id.String())
+	//t.pipelineProber.Remove(id.String())
+	//t.streamProber.Remove(id.String())
 
 	t.Logger.Info(
 		"removed remote peer",
@@ -345,18 +340,14 @@ func (t *Transport) UpdatePeer(id types.ID, us []string) {
 	}
 	urls, err := types.NewURLs(us)
 	if err != nil {
-		if t.Logger != nil {
-			t.Logger.Panic("failed NewURLs", zap.Strings("urls", us), zap.Error(err))
-		} else {
-			plog.Panicf("newURLs %+v should never fail: %+v", us, err)
-		}
+		t.Logger.Panic("failed NewURLs", zap.Strings("urls", us), zap.Error(err))
 	}
 	t.peers[id].update(urls)
 
-	t.pipelineProber.Remove(id.String())
-	addPeerToProber(t.Logger, t.pipelineProber, id.String(), us, RoundTripperNameSnapshot, rttSec)
-	t.streamProber.Remove(id.String())
-	addPeerToProber(t.Logger, t.streamProber, id.String(), us, RoundTripperNameRaftMessage, rttSec)
+	//t.pipelineProber.Remove(id.String())
+	//addPeerToProber(t.Logger, t.pipelineProber, id.String(), us, RoundTripperNameSnapshot, rttSec)
+	//t.streamProber.Remove(id.String())
+	//addPeerToProber(t.Logger, t.streamProber, id.String(), us, RoundTripperNameRaftMessage, rttSec)
 
 	t.Logger.Info(
 		"updated remote peer",
@@ -375,16 +366,16 @@ func (t *Transport) ActiveSince(id types.ID) time.Time {
 	return time.Time{}
 }
 
-func (t *Transport) SendSnapshot(m snap.Message) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	p := t.peers[types.ID(m.To)]
-	if p == nil {
-		m.CloseWithError(errMemberNotFound)
-		return
-	}
-	p.sendSnap(m)
-}
+//func (t *Transport) SendSnapshot(m snap.Message) {
+//	t.mu.Lock()
+//	defer t.mu.Unlock()
+//	p := t.peers[types.ID(m.To)]
+//	if p == nil {
+//		m.CloseWithError(errMemberNotFound)
+//		return
+//	}
+//	p.sendSnap(m)
+//}
 
 // Pausable is a testing interface for pausing transport traffic.
 type Pausable interface {

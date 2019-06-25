@@ -96,8 +96,8 @@ type streamWriter struct {
 	peerID  types.ID
 
 	status *peerStatus
-	fs     *stats.FollowerStats
-	r      Raft
+	//fs     *stats.FollowerStats
+	r Raft
 
 	mu      sync.Mutex // guard field working and closer
 	closer  io.Closer
@@ -111,7 +111,7 @@ type streamWriter struct {
 
 // startStreamWriter creates a streamWrite and starts a long running go-routine that accepts
 // messages and writes to the attached outgoing connection.
-func startStreamWriter(lg *zap.Logger, local, id types.ID, status *peerStatus, fs *stats.FollowerStats, r Raft) *streamWriter {
+func startStreamWriter(lg *zap.Logger, local, id types.ID, status *peerStatus, r Raft) *streamWriter {
 	w := &streamWriter{
 		lg: lg,
 
@@ -119,12 +119,12 @@ func startStreamWriter(lg *zap.Logger, local, id types.ID, status *peerStatus, f
 		peerID:  id,
 
 		status: status,
-		fs:     fs,
-		r:      r,
-		msgc:   make(chan raftpb.Message, streamBufSize),
-		connc:  make(chan *outgoingConn),
-		stopc:  make(chan struct{}),
-		done:   make(chan struct{}),
+		//fs:     fs,
+		r:     r,
+		msgc:  make(chan raftpb.Message, streamBufSize),
+		connc: make(chan *outgoingConn),
+		stopc: make(chan struct{}),
+		done:  make(chan struct{}),
 	}
 	go w.run()
 	return w
@@ -205,7 +205,7 @@ func (cw *streamWriter) run() {
 			t = conn.t
 			switch conn.t {
 			case streamTypeMsgAppV2:
-				enc = newMsgAppV2Encoder(conn.Writer, cw.fs)
+				enc = newMsgAppV2Encoder(conn.Writer)
 			case streamTypeMessage:
 				enc = &messageEncoder{w: conn.Writer}
 			default:

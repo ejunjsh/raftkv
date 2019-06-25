@@ -34,7 +34,7 @@ type pipeline struct {
 	raft   Raft
 	errorc chan error
 	// deprecate when we depercate v2 API
-	followerStats *stats.FollowerStats
+	//followerStats *stats.FollowerStats
 
 	msgc chan raftpb.Message
 	// wait for the handling routines
@@ -88,16 +88,16 @@ func (p *pipeline) handle() {
 	for {
 		select {
 		case m := <-p.msgc:
-			start := time.Now()
+			//start := time.Now()
 			err := p.post(pbutil.MustMarshal(&m))
-			end := time.Now()
+			//end := time.Now()
 
 			if err != nil {
 				p.status.deactivate(failureType{source: pipelineMsg, action: "write"}, err.Error())
 
-				if m.Type == raftpb.MsgApp && p.followerStats != nil {
-					p.followerStats.Fail()
-				}
+				//if m.Type == raftpb.MsgApp && p.followerStats != nil {
+				//	p.followerStats.Fail()
+				//}
 				p.raft.ReportUnreachable(m.To)
 				if isMsgSnap(m) {
 					p.raft.ReportSnapshot(m.To, raft.SnapshotFailure)
@@ -106,9 +106,9 @@ func (p *pipeline) handle() {
 			}
 
 			p.status.activate()
-			if m.Type == raftpb.MsgApp && p.followerStats != nil {
-				p.followerStats.Succ(end.Sub(start))
-			}
+			//if m.Type == raftpb.MsgApp && p.followerStats != nil {
+			//	p.followerStats.Succ(end.Sub(start))
+			//}
 			if isMsgSnap(m) {
 				p.raft.ReportSnapshot(m.To, raft.SnapshotFinish)
 			}

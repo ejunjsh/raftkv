@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/ejunjsh/raftkv/pkg/raft"
 	"github.com/ejunjsh/raftkv/pkg/raft/raftpb"
-	"github.com/ejunjsh/raftkv/pkg/snap"
 	"github.com/ejunjsh/raftkv/pkg/types"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
@@ -47,7 +46,7 @@ type Peer interface {
 
 	// sendSnap sends the merged snapshot message to the remote peer. Its behavior
 	// is similar to send.
-	sendSnap(m snap.Message)
+	//sendSnap(m snap.Message)
 
 	// update updates the urls of remote peer.
 	update(urls types.URLs)
@@ -92,7 +91,7 @@ type peer struct {
 	msgAppV2Writer *streamWriter
 	writer         *streamWriter
 	pipeline       *pipeline
-	snapSender     *snapshotSender // snapshot sender to send v3 snapshot messages
+	//snapSender     *snapshotSender // snapshot sender to send v3 snapshot messages
 	msgAppV2Reader *streamReader
 	msgAppReader   *streamReader
 
@@ -106,7 +105,7 @@ type peer struct {
 	stopc  chan struct{}
 }
 
-func startPeer(t *Transport, urls types.URLs, peerID types.ID, fs *stats.FollowerStats) *peer {
+func startPeer(t *Transport, urls types.URLs, peerID types.ID) *peer {
 	t.Logger.Info("starting remote peer", zap.String("remote-peer-id", peerID.String()))
 	defer func() {
 		t.Logger.Info("started remote peer", zap.String("remote-peer-id", peerID.String()))
@@ -117,13 +116,13 @@ func startPeer(t *Transport, urls types.URLs, peerID types.ID, fs *stats.Followe
 	errorc := t.ErrorC
 	r := t.Raft
 	pipeline := &pipeline{
-		peerID:        peerID,
-		tr:            t,
-		picker:        picker,
-		status:        status,
-		followerStats: fs,
-		raft:          r,
-		errorc:        errorc,
+		peerID: peerID,
+		tr:     t,
+		picker: picker,
+		status: status,
+		//followerStats: fs,
+		raft:   r,
+		errorc: errorc,
 	}
 	pipeline.start()
 
@@ -134,13 +133,13 @@ func startPeer(t *Transport, urls types.URLs, peerID types.ID, fs *stats.Followe
 		r:              r,
 		status:         status,
 		picker:         picker,
-		msgAppV2Writer: startStreamWriter(t.Logger, t.ID, peerID, status, fs, r),
-		writer:         startStreamWriter(t.Logger, t.ID, peerID, status, fs, r),
+		msgAppV2Writer: startStreamWriter(t.Logger, t.ID, peerID, status, r),
+		writer:         startStreamWriter(t.Logger, t.ID, peerID, status, r),
 		pipeline:       pipeline,
-		snapSender:     newSnapshotSender(t, picker, peerID, status),
-		recvc:          make(chan raftpb.Message, recvBufSize),
-		propc:          make(chan raftpb.Message, maxPendingProposals),
-		stopc:          make(chan struct{}),
+		//snapSender:     newSnapshotSender(t, picker, peerID, status),
+		recvc: make(chan raftpb.Message, recvBufSize),
+		propc: make(chan raftpb.Message, maxPendingProposals),
+		stopc: make(chan struct{}),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -212,7 +211,7 @@ func (p *peer) send(m raftpb.Message) {
 		return
 	}
 
-	writec, name := p.pick(m)
+	writec, _ := p.pick(m)
 	select {
 	case writec <- m:
 	default:
@@ -246,9 +245,9 @@ func isMsgApp(m raftpb.Message) bool { return m.Type == raftpb.MsgApp }
 
 func isMsgSnap(m raftpb.Message) bool { return m.Type == raftpb.MsgSnap }
 
-func (p *peer) sendSnap(m snap.Message) {
-	go p.snapSender.send(m)
-}
+//func (p *peer) sendSnap(m snap.Message) {
+//	go p.snapSender.send(m)
+//}
 
 func (p *peer) update(urls types.URLs) {
 	p.picker.update(urls)
@@ -302,7 +301,7 @@ func (p *peer) stop() {
 	p.msgAppV2Writer.stop()
 	p.writer.stop()
 	p.pipeline.stop()
-	p.snapSender.stop()
+	//p.snapSender.stop()
 	p.msgAppV2Reader.stop()
 	p.msgAppReader.stop()
 }

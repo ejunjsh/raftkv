@@ -78,7 +78,7 @@ func checkPostResponse(resp *http.Response, body []byte, req *http.Request, to t
 	case http.StatusPreconditionFailed:
 		switch strings.TrimSuffix(string(body), "\n") {
 		case errClusterIDMismatch.Error():
-			log.Println("request sent was ignored (cluster ID mismatch: remote[%s]=%s, local=%s)",
+			log.Printf("request sent was ignored (cluster ID mismatch: remote[%s]=%s, local=%s)",
 				to, resp.Header.Get("X-Cluster-ID"), req.Header.Get("X-Cluster-ID"))
 			return errClusterIDMismatch
 		default:
