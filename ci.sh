@@ -14,4 +14,4 @@ go test -v ./pkg/snap
 go test -v ./pkg/testutil
 go test -v ./pkg/transport
 go test -v ./pkg/types
-go test -v ./pkg/wal
+go test -v ./pkg/wal -bench ^BenchmarkWrite100
