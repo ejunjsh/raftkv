@@ -3,11 +3,8 @@ package rafthttp
 import (
 	"context"
 	"errors"
-	"fmt"
-	"github.com/dustin/go-humanize"
 	pioutil "github.com/ejunjsh/raftkv/pkg/ioutil"
 	"github.com/ejunjsh/raftkv/pkg/raft/raftpb"
-	"github.com/ejunjsh/raftkv/pkg/snap"
 	"github.com/ejunjsh/raftkv/pkg/types"
 	"go.uber.org/zap"
 	"io/ioutil"
@@ -27,13 +24,13 @@ const (
 )
 
 var (
-	RaftPrefix         = "/raft"
-	ProbingPrefix      = path.Join(RaftPrefix, "probing")
-	RaftStreamPrefix   = path.Join(RaftPrefix, "stream")
-	RaftSnapshotPrefix = path.Join(RaftPrefix, "snapshot")
+	RaftPrefix = "/raft"
+	//ProbingPrefix      = path.Join(RaftPrefix, "probing")
+	RaftStreamPrefix = path.Join(RaftPrefix, "stream")
+	//RaftSnapshotPrefix = path.Join(RaftPrefix, "snapshot")
 
-	errIncompatibleVersion = errors.New("incompatible version")
-	errClusterIDMismatch   = errors.New("cluster ID mismatch")
+	//errIncompatibleVersion = errors.New("incompatible version")
+	errClusterIDMismatch = errors.New("cluster ID mismatch")
 )
 
 type peerGetter interface {
@@ -75,6 +72,11 @@ func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("X-Cluster-ID", h.cid.String())
+
+	if err := checkClusterCompatibilityFromHeader(h.lg, h.localID, r.Header, h.cid); err != nil {
+		http.Error(w, err.Error(), http.StatusPreconditionFailed)
+		return
+	}
 
 	addRemoteFromRequest(h.tr, r)
 
@@ -126,28 +128,28 @@ func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type snapshotHandler struct {
-	lg          *zap.Logger
-	tr          Transporter
-	r           Raft
-	snapshotter *snap.Snapshotter
-
-	localID types.ID
-	cid     types.ID
-}
-
-func newSnapshotHandler(t *Transport, r Raft, snapshotter *snap.Snapshotter, cid types.ID) http.Handler {
-	return &snapshotHandler{
-		lg:          t.Logger,
-		tr:          t,
-		r:           r,
-		snapshotter: snapshotter,
-		localID:     t.ID,
-		cid:         cid,
-	}
-}
-
-const unknownSnapshotSender = "UNKNOWN_SNAPSHOT_SENDER"
+//type snapshotHandler struct {
+//	lg          *zap.Logger
+//	tr          Transporter
+//	r           Raft
+//	snapshotter *snap.Snapshotter
+//
+//	localID types.ID
+//	cid     types.ID
+//}
+//
+//func newSnapshotHandler(t *Transport, r Raft, snapshotter *snap.Snapshotter, cid types.ID) http.Handler {
+//	return &snapshotHandler{
+//		lg:          t.Logger,
+//		tr:          t,
+//		r:           r,
+//		snapshotter: snapshotter,
+//		localID:     t.ID,
+//		cid:         cid,
+//	}
+//}
+//
+//const unknownSnapshotSender = "UNKNOWN_SNAPSHOT_SENDER"
 
 // ServeHTTP serves HTTP request to receive and process snapshot message.
 //
@@ -158,102 +160,107 @@ const unknownSnapshotSender = "UNKNOWN_SNAPSHOT_SENDER"
 // 1. snapshot messages sent through other TCP connections could still be
 // received and processed.
 // 2. this case should happen rarely, so no further optimization is done.
-func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		w.Header().Set("Allow", "POST")
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	w.Header().Set("X-Cluster-ID", h.cid.String())
-
-	addRemoteFromRequest(h.tr, r)
-
-	dec := &messageDecoder{r: r.Body}
-	// let snapshots be very large since they can exceed 512MB for large installations
-	m, err := dec.decodeLimit(uint64(1 << 63))
-	from := types.ID(m.From).String()
-	if err != nil {
-		msg := fmt.Sprintf("failed to decode raft message (%v)", err)
-		h.lg.Warn(
-			"failed to decode Raft message",
-			zap.String("local-member-id", h.localID.String()),
-			zap.String("remote-snapshot-sender-id", from),
-			zap.Error(err),
-		)
-		http.Error(w, msg, http.StatusBadRequest)
-		return
-	}
-
-	msgSize := m.Size()
-
-	if m.Type != raftpb.MsgSnap {
-		h.lg.Warn(
-			"unexpected Raft message type",
-			zap.String("local-member-id", h.localID.String()),
-			zap.String("remote-snapshot-sender-id", from),
-			zap.String("message-type", m.Type.String()),
-		)
-		http.Error(w, "wrong raft message type", http.StatusBadRequest)
-		return
-	}
-
-	h.lg.Info(
-		"receiving database snapshot",
-		zap.String("local-member-id", h.localID.String()),
-		zap.String("remote-snapshot-sender-id", from),
-		zap.Uint64("incoming-snapshot-index", m.Snapshot.Metadata.Index),
-		zap.Int("incoming-snapshot-message-size-bytes", msgSize),
-		zap.String("incoming-snapshot-message-size", humanize.Bytes(uint64(msgSize))),
-	)
-
-	// save incoming database snapshot.
-	n, err := h.snapshotter.SaveDBFrom(r.Body, m.Snapshot.Metadata.Index)
-	if err != nil {
-		msg := fmt.Sprintf("failed to save KV snapshot (%v)", err)
-		h.lg.Warn(
-			"failed to save incoming database snapshot",
-			zap.String("local-member-id", h.localID.String()),
-			zap.String("remote-snapshot-sender-id", from),
-			zap.Uint64("incoming-snapshot-index", m.Snapshot.Metadata.Index),
-			zap.Error(err),
-		)
-		http.Error(w, msg, http.StatusInternalServerError)
-		return
-	}
-
-	h.lg.Info(
-		"received and saved database snapshot",
-		zap.String("local-member-id", h.localID.String()),
-		zap.String("remote-snapshot-sender-id", from),
-		zap.Uint64("incoming-snapshot-index", m.Snapshot.Metadata.Index),
-		zap.Int64("incoming-snapshot-size-bytes", n),
-		zap.String("incoming-snapshot-size", humanize.Bytes(uint64(n))),
-	)
-
-	if err := h.r.Process(context.TODO(), m); err != nil {
-		switch v := err.(type) {
-		// Process may return writerToResponse error when doing some
-		// additional checks before calling raft.Node.Step.
-		case writerToResponse:
-			v.WriteTo(w)
-		default:
-			msg := fmt.Sprintf("failed to process raft message (%v)", err)
-			h.lg.Warn(
-				"failed to process Raft message",
-				zap.String("local-member-id", h.localID.String()),
-				zap.String("remote-snapshot-sender-id", from),
-				zap.Error(err),
-			)
-			http.Error(w, msg, http.StatusInternalServerError)
-		}
-		return
-	}
-
-	// Write StatusNoContent header after the message has been processed by
-	// raft, which facilitates the client to report MsgSnap status.
-	w.WriteHeader(http.StatusNoContent)
-}
+//func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+//	if r.Method != "POST" {
+//		w.Header().Set("Allow", "POST")
+//		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+//		return
+//	}
+//
+//	w.Header().Set("X-Cluster-ID", h.cid.String())
+//
+//	if err := checkClusterCompatibilityFromHeader(h.lg, h.localID, r.Header, h.cid); err != nil {
+//		http.Error(w, err.Error(), http.StatusPreconditionFailed)
+//		return
+//	}
+//
+//	addRemoteFromRequest(h.tr, r)
+//
+//	dec := &messageDecoder{r: r.Body}
+//	// let snapshots be very large since they can exceed 512MB for large installations
+//	m, err := dec.decodeLimit(uint64(1 << 63))
+//	from := types.ID(m.From).String()
+//	if err != nil {
+//		msg := fmt.Sprintf("failed to decode raft message (%v)", err)
+//		h.lg.Warn(
+//			"failed to decode Raft message",
+//			zap.String("local-member-id", h.localID.String()),
+//			zap.String("remote-snapshot-sender-id", from),
+//			zap.Error(err),
+//		)
+//		http.Error(w, msg, http.StatusBadRequest)
+//		return
+//	}
+//
+//	msgSize := m.Size()
+//
+//	if m.Type != raftpb.MsgSnap {
+//		h.lg.Warn(
+//			"unexpected Raft message type",
+//			zap.String("local-member-id", h.localID.String()),
+//			zap.String("remote-snapshot-sender-id", from),
+//			zap.String("message-type", m.Type.String()),
+//		)
+//		http.Error(w, "wrong raft message type", http.StatusBadRequest)
+//		return
+//	}
+//
+//	h.lg.Info(
+//		"receiving database snapshot",
+//		zap.String("local-member-id", h.localID.String()),
+//		zap.String("remote-snapshot-sender-id", from),
+//		zap.Uint64("incoming-snapshot-index", m.Snapshot.Metadata.Index),
+//		zap.Int("incoming-snapshot-message-size-bytes", msgSize),
+//		zap.String("incoming-snapshot-message-size", humanize.Bytes(uint64(msgSize))),
+//	)
+//
+//	// save incoming database snapshot.
+//	n, err := h.snapshotter.SaveDBFrom(r.Body, m.Snapshot.Metadata.Index)
+//	if err != nil {
+//		msg := fmt.Sprintf("failed to save KV snapshot (%v)", err)
+//		h.lg.Warn(
+//			"failed to save incoming database snapshot",
+//			zap.String("local-member-id", h.localID.String()),
+//			zap.String("remote-snapshot-sender-id", from),
+//			zap.Uint64("incoming-snapshot-index", m.Snapshot.Metadata.Index),
+//			zap.Error(err),
+//		)
+//		http.Error(w, msg, http.StatusInternalServerError)
+//		return
+//	}
+//
+//	h.lg.Info(
+//		"received and saved database snapshot",
+//		zap.String("local-member-id", h.localID.String()),
+//		zap.String("remote-snapshot-sender-id", from),
+//		zap.Uint64("incoming-snapshot-index", m.Snapshot.Metadata.Index),
+//		zap.Int64("incoming-snapshot-size-bytes", n),
+//		zap.String("incoming-snapshot-size", humanize.Bytes(uint64(n))),
+//	)
+//
+//	if err := h.r.Process(context.TODO(), m); err != nil {
+//		switch v := err.(type) {
+//		// Process may return writerToResponse error when doing some
+//		// additional checks before calling raft.Node.Step.
+//		case writerToResponse:
+//			v.WriteTo(w)
+//		default:
+//			msg := fmt.Sprintf("failed to process raft message (%v)", err)
+//			h.lg.Warn(
+//				"failed to process Raft message",
+//				zap.String("local-member-id", h.localID.String()),
+//				zap.String("remote-snapshot-sender-id", from),
+//				zap.Error(err),
+//			)
+//			http.Error(w, msg, http.StatusInternalServerError)
+//		}
+//		return
+//	}
+//
+//	// Write StatusNoContent header after the message has been processed by
+//	// raft, which facilitates the client to report MsgSnap status.
+//	w.WriteHeader(http.StatusNoContent)
+//}
 
 type streamHandler struct {
 	lg         *zap.Logger
@@ -283,6 +290,11 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("X-Cluster-ID", h.cid.String())
+
+	if err := checkClusterCompatibilityFromHeader(h.lg, h.tr.ID, r.Header, h.cid); err != nil {
+		http.Error(w, err.Error(), http.StatusPreconditionFailed)
+		return
+	}
 
 	var t streamType
 	switch path.Dir(r.URL.Path) {
@@ -373,6 +385,24 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	p.attachOutgoingConn(conn)
 	<-c.closeNotify()
+}
+
+// checkClusterCompatibilityFromHeader checks the cluster compatibility of
+// the local member from the given header.
+// It checks whether the version of local member is compatible with
+// the versions in the header, and whether the cluster ID of local member
+// matches the one in the header.
+func checkClusterCompatibilityFromHeader(lg *zap.Logger, localID types.ID, header http.Header, cid types.ID) error {
+	if gcid := header.Get("X-Cluster-ID"); gcid != cid.String() {
+		lg.Warn(
+			"request cluster ID mismatch",
+			zap.String("local-member-id", localID.String()),
+			zap.String("local-member-cluster-id", cid.String()),
+			zap.String("remote-peer-cluster-id", gcid),
+		)
+		return errClusterIDMismatch
+	}
+	return nil
 }
 
 type closeNotifier struct {
