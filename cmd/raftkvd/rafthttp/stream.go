@@ -26,21 +26,21 @@ const (
 	streamBufSize = 4096
 )
 
-var (
-	errUnsupportedStreamType = fmt.Errorf("unsupported stream type")
-
-	// the key is in string format "major.minor.patch"
-	supportedStream = map[string][]streamType{
-		"2.0.0": {},
-		"2.1.0": {streamTypeMsgAppV2, streamTypeMessage},
-		"2.2.0": {streamTypeMsgAppV2, streamTypeMessage},
-		"2.3.0": {streamTypeMsgAppV2, streamTypeMessage},
-		"3.0.0": {streamTypeMsgAppV2, streamTypeMessage},
-		"3.1.0": {streamTypeMsgAppV2, streamTypeMessage},
-		"3.2.0": {streamTypeMsgAppV2, streamTypeMessage},
-		"3.3.0": {streamTypeMsgAppV2, streamTypeMessage},
-	}
-)
+//var (
+//	errUnsupportedStreamType = fmt.Errorf("unsupported stream type")
+//
+//	// the key is in string format "major.minor.patch"
+//	supportedStream = map[string][]streamType{
+//		"2.0.0": {},
+//		"2.1.0": {streamTypeMsgAppV2, streamTypeMessage},
+//		"2.2.0": {streamTypeMsgAppV2, streamTypeMessage},
+//		"2.3.0": {streamTypeMsgAppV2, streamTypeMessage},
+//		"3.0.0": {streamTypeMsgAppV2, streamTypeMessage},
+//		"3.1.0": {streamTypeMsgAppV2, streamTypeMessage},
+//		"3.2.0": {streamTypeMsgAppV2, streamTypeMessage},
+//		"3.3.0": {streamTypeMsgAppV2, streamTypeMessage},
+//	}
+//)
 
 type streamType string
 
@@ -355,9 +355,9 @@ func (cr *streamReader) run() {
 	for {
 		rc, err := cr.dial(t)
 		if err != nil {
-			if err != errUnsupportedStreamType {
-				cr.status.deactivate(failureType{source: t.String(), action: "dial"}, err.Error())
-			}
+			//if err != errUnsupportedStreamType {
+			cr.status.deactivate(failureType{source: t.String(), action: "dial"}, err.Error())
+			//}
 		} else {
 			cr.status.activate()
 			cr.lg.Info(
