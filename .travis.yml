@@ -4,4 +4,7 @@ go:
   - 1.12
 
 script:
+  - go test ./cmd/raftkvd/rafthttp
+  - go test ./cmd/raftkvd
+  - go test ./pkg/raft
   - go install ./cmd/raftkvd
