@@ -2,6 +2,7 @@
 
 set -e
 
+go install ./cmd/raftkvd
 go test -v ./cmd/raftkvd/rafthttp
 go test -v ./cmd/raftkvd
 go test -v ./pkg/raft
@@ -14,4 +15,3 @@ go test -v ./pkg/testutil
 go test -v ./pkg/transport
 go test -v ./pkg/types
 go test -v ./pkg/wal
-go install ./cmd/raftkvd

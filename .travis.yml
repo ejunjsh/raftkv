@@ -4,5 +4,4 @@ go:
   - 1.12
 
 script:
-  - sh test.sh
-  - go install ./cmd/raftkvd
+  - sh ci.sh
