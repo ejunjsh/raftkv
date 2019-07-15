@@ -2,7 +2,9 @@
 
 [![Build Status](https://travis-ci.org/ejunjsh/raftkv.svg?branch=master)](https://travis-ci.org/ejunjsh/raftkv)
 
-distributed key value storage with raft,most of the code is from [etcd](https://github.com/etcd-io/etcd) , just for reading and learning its source code
+distributed key value storage with raft
+
+most of the code is from [etcd](https://github.com/etcd-io/etcd) , just for reading and learning its source code
 
 ## Getting Started
 
@@ -54,6 +56,10 @@ Now it's possible to write a key-value pair to any member of the cluster and lik
 To test cluster recovery, first start a cluster and write a value "foo":
 ```sh
 # start all nodes before
+raftkvd --id 1 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 12380
+raftkvd --id 2 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 22380
+raftkvd --id 3 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 32380
+
 curl -L http://127.0.0.1:12380/my-key -XPUT -d foo
 ```
 
@@ -61,6 +67,7 @@ Next, remove a node and replace the value with "bar" to check cluster availabili
 
 ```sh
 # kill the node 2 before
+kill ...
 curl -L http://127.0.0.1:12380/my-key -XPUT -d bar
 curl -L http://127.0.0.1:32380/my-key
 ```
@@ -68,6 +75,7 @@ curl -L http://127.0.0.1:32380/my-key
 Finally, bring the node back up and verify it recovers with the updated value "bar":
 ```sh
 # restart node 2 before
+raftkvd --id 2 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 22380
 curl -L http://127.0.0.1:22380/my-key
 ```
 
