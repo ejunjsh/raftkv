@@ -15,7 +15,7 @@ most of the code is from [etcd](https://github.com/etcd-io/etcd) , just for read
     
 ### build and test locally
 
-    # git clone first
+    cd $GOPATH/src/github.com/ejunjsh/raftkv/
     sh ci.sh
 
 ### Running single node
